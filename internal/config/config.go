@@ -1123,6 +1123,9 @@ type EvidenceRaw struct {
 	// EffectiveRepoConfig): a contributor's pushed branch must not be able to
 	// aim evidence commits at another branch of the repository.
 	Branch *string `yaml:"branch"`
+	// CommitMessage templates the evidence-branch commit subject. Like
+	// commit.fix_message it only shapes a message, so it is pushed-readable.
+	CommitMessage *string `yaml:"commit_message"`
 	// LocalRoot, Retention, and MaxRuns describe this MACHINE's evidence
 	// storage: where the daemon writes artifacts on local disk and how long it
 	// keeps them. They are global-only - Merge resolves them straight from
@@ -1162,6 +1165,9 @@ type Evidence struct {
 	AttachMedia bool
 	Dir         string
 	Branch      string
+	// CommitMessage is the configured subject template; empty keeps the
+	// built-in subject (see RenderCommitMessage).
+	CommitMessage string
 	// LocalRoot overrides the app-root default for on-disk evidence; empty
 	// means paths.EvidenceDir(). Retention and MaxRuns bound how much of it
 	// survives: no-mistakes reaps its own evidence rather than leaving that to
@@ -1582,6 +1588,8 @@ ci:
   carry_review_on_replay: false
 
 # Auto-fix commit subject template. Available variables: {{.Step}}, {{.Summary}}, and {{.Branch}}.
+# When set to anything but the default, it also renders the Push step's
+# catch-all commit (step "push", summary "apply agent fixes").
 # {{.Branch}} is the normalized branch name, or the only capture group from
 # branch_pattern when configured. A branch pattern with no match fails safely.
 # Global-only branch_replacement can add literal text around that group with ${1}.
@@ -1628,12 +1636,15 @@ intent:
 # directory to another disk and must be an absolute path. These three are
 # global-only - a repository's .no-mistakes.yaml cannot change where this
 # machine writes evidence or how long it keeps it.
+# commit_message templates the evidence-branch commit subject with
+# {{.Branch}} and {{.RunID}}; it follows commit.fix_message's template rules.
 # test:
 #   evidence:
 #     store_in_repo: true
 #     attach_media: true
 #     dir: .no-mistakes/evidence
 #     branch: no-mistakes/evidence
+#     commit_message: "no-mistakes: evidence for {{.Branch}} (run {{.RunID}})"
 #     local_root: /var/lib/no-mistakes/evidence
 #     retention: 720h
 #     max_runs: 50
@@ -3092,7 +3103,7 @@ func EffectiveRepoConfig(pushed, trusted *RepoConfig, allowRepoCommands bool) *R
 		// test.evidence.branch names the git ref evidence commits are pushed
 		// to with the maintainer's credentials. It is trusted-only so a pushed
 		// branch cannot aim them at another branch of the repository; the rest
-		// of test.evidence (store_in_repo, attach_media, dir) stays
+		// of test.evidence (store_in_repo, attach_media, dir, commit_message) stays
 		// pushed-readable because it only picks how artifacts are published.
 		// The publisher independently refuses any branch without its marker
 		// file, and the upload client refuses Actions/App installation tokens,
@@ -3255,6 +3266,9 @@ func applyTestOverrides(dst *Test, src *TestRaw) {
 			dst.Evidence.Branch = branch
 		}
 	}
+	if src.Evidence.CommitMessage != nil {
+		dst.Evidence.CommitMessage = *src.Evidence.CommitMessage
+	}
 }
 
 // applyEvidenceStorageOverrides applies the global-only local-storage half of
@@ -3405,6 +3419,11 @@ func validateTestRaw(test TestRaw) error {
 	if test.Evidence.Branch != nil {
 		if _, err := evidence.NormalizeBranch(*test.Evidence.Branch); err != nil {
 			return fmt.Errorf("test.evidence.branch: %w", err)
+		}
+	}
+	if test.Evidence.CommitMessage != nil {
+		if _, err := renderEvidenceMessage(*test.Evidence.CommitMessage, "branch", "run"); err != nil {
+			return err
 		}
 	}
 	// local_root must be absolute. The daemon's working directory is a bare
