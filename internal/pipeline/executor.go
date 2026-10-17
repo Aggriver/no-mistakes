@@ -37,6 +37,7 @@ const (
 )
 
 type approvalResponse struct {
+	origin         types.ResponseOrigin
 	action         types.ApprovalAction
 	findingIDs     []string
 	instructions   map[string]string
@@ -172,12 +173,20 @@ func (e *Executor) SetGateReconcileTimings(interval, timeout time.Duration) {
 	}
 }
 
-// Respond sends a user approval action to the currently waiting step.
+// Respond sends a gate response to the currently waiting step.
 // The step parameter must match the step currently awaiting approval.
 // Returns an error if no step is awaiting approval or if the step name doesn't match.
 func (e *Executor) Respond(step types.StepName, action types.ApprovalAction, findingIDs []string) error {
 	_, err := e.RespondWithOverrides(step, action, findingIDs, nil, nil, nil, "")
 	return err
+}
+
+// ResponseOptions carries caller-supplied audit metadata and the optional
+// complete-coverage binding. An omitted origin is unknown, including direct
+// executor responses that did not come from an IPC client.
+type ResponseOptions struct {
+	Origin   types.ResponseOrigin
+	Coverage *ipc.CoverageBinding
 }
 
 // RespondWithOverrides is like Respond but also carries explicit declines,
@@ -191,7 +200,12 @@ func (e *Executor) Respond(step types.StepName, action types.ApprovalAction, fin
 //
 // It returns the dispositions the response recorded, which the daemon echoes
 // to the caller.
-func (e *Executor) RespondWithOverrides(step types.StepName, action types.ApprovalAction, findingIDs, ignoreFindingIDs []string, instructions map[string]string, addedFindings []types.Finding, approvalReason string, coverage ...*ipc.CoverageBinding) (RespondDispositions, error) {
+func (e *Executor) RespondWithOverrides(step types.StepName, action types.ApprovalAction, findingIDs, ignoreFindingIDs []string, instructions map[string]string, addedFindings []types.Finding, approvalReason string, options ...ResponseOptions) (RespondDispositions, error) {
+	var option ResponseOptions
+	if len(options) > 0 {
+		option = options[0]
+	}
+	coverage := []*ipc.CoverageBinding{option.Coverage}
 	if approvalReason != "" && (step != types.StepTest || action != types.ActionApprove) {
 		return RespondDispositions{}, fmt.Errorf("an approval reason applies only to Test approval")
 	}
@@ -249,6 +263,7 @@ func (e *Executor) RespondWithOverrides(step types.StepName, action types.Approv
 		return RespondDispositions{}, errors.New(refusal)
 	}
 	response := approvalResponse{
+		origin:         option.Origin.OrUnknown(),
 		action:         action,
 		findingIDs:     findingIDs,
 		instructions:   instructions,
@@ -320,6 +335,12 @@ func (e *Executor) RespondWithOverrides(step types.StepName, action types.Approv
 		// gate's own order rather than ahead of the ones the response named.
 		dispositions.Fixed = combineSelectedFindingIDs(idsInPayloadOrder(response.findingIDs, findingIDsInPayloadOrder(e.waitingFindings)), normalized)
 		dispositions.Kept = excludeFindingIDs(split.Kept, restoredGateIDs)
+	}
+	if action != types.ActionFix && e.db != nil && e.waitingStepResultID != "" {
+		if err := e.db.SetStepResponseOrigin(e.waitingStepResultID, option.Origin); err != nil {
+			e.mu.Unlock()
+			return RespondDispositions{}, err
+		}
 	}
 	e.waiting = false
 	e.waitingFindings = ""
@@ -1805,13 +1826,15 @@ func (e *Executor) persistResponseDecision(step types.StepName, response approva
 	idsJSON := marshalFindingIDs(combineSelectedFindingIDs(response.findingIDs, persisted))
 	if idsJSON == "" {
 		if len(response.ignoreFindingIDs) > 0 {
-			if err := e.db.SetStepRoundDeclined(e.waitingRoundID); err != nil {
+			if err := e.db.SetStepRoundDeclined(e.waitingRoundID, response.origin); err != nil {
 				return fmt.Errorf("record the response's declines: %w", err)
 			}
+			return nil
 		}
-		return nil
+		// A fix response with nothing to select still has caller provenance.
+		return e.db.SetStepResponseOrigin(e.waitingStepResultID, response.origin)
 	}
-	if err := e.db.SetStepRoundUserDecision(e.waitingRoundID, &idsJSON, db.RoundSelectionSourceUser, &persisted); err != nil {
+	if err := e.db.SetStepRoundUserDecision(e.waitingRoundID, &idsJSON, db.RoundSelectionSourceUser, &persisted, response.origin); err != nil {
 		return fmt.Errorf("record the response's selection: %w", err)
 	}
 	return nil
@@ -1910,11 +1933,11 @@ func restorePendingDecision(response approvalResponse, previous, gate string) (a
 // decision instead of leaving no trace.
 //
 // Before this existed, those three resolutions wrote no finding-level state at
-// all, so a round where the human read a blocking finding and said "ship it as
+// all, so a round where the caller read a blocking finding and said "ship it as
 // is" was byte-identical to a round with no findings. Nothing downstream could
 // tell the two apart, and the only durable statement of what the change must do
 // stayed the user-intent prose - which is how a later step could re-derive and
-// re-apply the very change the human had just declined.
+// re-apply the very change the caller had just declined.
 //
 // The decline is stored the way a partial selection already stores one: as the
 // complement of selected_finding_ids. Writing an explicit empty array with the

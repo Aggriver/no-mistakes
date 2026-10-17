@@ -247,7 +247,7 @@ type SubscribeParams struct {
 	RunID string `json:"run_id"`
 }
 
-// RespondParams sends a user action for a step awaiting approval.
+// RespondParams sends a gate action for a step awaiting approval.
 //
 // Instructions carries optional per-finding notes keyed by finding ID, which
 // the daemon attaches to the corresponding finding before dispatching a fix.
@@ -261,6 +261,7 @@ type SubscribeParams struct {
 // already decided it, and the daemon refuses the response (leaving the gate
 // parked) when one is left out. An omission is never a decline.
 type RespondParams struct {
+	Origin           types.ResponseOrigin `json:"origin,omitempty"`
 	Coverage         *CoverageBinding     `json:"coverage,omitempty"`
 	RunID            string               `json:"run_id"`
 	Step             types.StepName       `json:"step"`
