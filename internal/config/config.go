@@ -691,6 +691,9 @@ type CIRaw struct {
 	RebaseBehind *bool `yaml:"rebase_behind"`
 	// CarryReviewOnReplay is a pointer for the same reason as RevalidateRepairs.
 	CarryReviewOnReplay *bool `yaml:"carry_review_on_replay"`
+	// ReleaseAfterChecksPass is a pointer for the same reason as
+	// RevalidateRepairs: a repository must be able to opt back out.
+	ReleaseAfterChecksPass *bool `yaml:"release_after_checks_pass"`
 }
 
 // CI holds the resolved CI-step settings.
@@ -763,6 +766,23 @@ type CI struct {
 	// keeps meaning "every repair re-passes Review", or when the run has a
 	// review-anchored gate, which would otherwise be skipped for the new head.
 	CarryReviewOnReplay bool
+
+	// ReleaseAfterChecksPass makes the CI step finish the run at its checks
+	// verdict instead of monitoring the pull request until it is merged or
+	// closed.
+	//
+	// false (default): the step records readiness and keeps polling, which is
+	// the behavior every run has had until now - a later base-branch advance or
+	// conflict is repaired and the merge itself is observed, bounded by
+	// ci_timeout.
+	//
+	// true: the green observation ends the step, and the run completes with the
+	// checks_passed status, releasing its worktree and its lane while the merge
+	// decision stays with a human. It is opt-in because it changes how long a
+	// run lives and how much a caller may assume a still-active run is watching
+	// (see VISION.md's cost and consent rules). A trusted repository config may
+	// set it for its own workflow.
+	ReleaseAfterChecksPass bool
 }
 
 // RebaseRaw is the YAML representation of rebase-step settings.
@@ -1402,13 +1422,12 @@ forgejo_axi_path: forgejo-axi
 #   cursor: cursor-agent acp
 #   devin: devin acp
 
-# Maximum time the CI monitor babysits an open PR with no base-branch movement
-# before giving up. The monitor watches CI and rebases the PR onto its base when
-# it has a merge conflict (or, with ci.rebase_behind, when GitHub reports it
-# green but BEHIND); each base advance re-arms this timer, so an
-# actively-updated green PR keeps its monitor. Set to "unlimited", "none", "off", "never", or any
-# non-positive duration to monitor until the PR is merged, closed, or the run is
-# aborted with: no-mistakes axi abort --run <id>
+# Idle timeout for the CI monitor: the wait for checks to finish and the merge
+# watch it keeps afterwards. Each base-branch advance re-arms this timer.
+# Set to "unlimited", "none", "off", "never", or any non-positive duration
+# to disable the timeout. By default the monitor keeps watching after checks
+# are green; ci.release_after_checks_pass ends the run at readiness.
+# See docs/src/content/docs/reference/global-config.md#ci_timeout.
 ci_timeout: "168h"
 
 # AXI status marks a running/fixing step as quiet when no step log or native
@@ -1595,6 +1614,18 @@ ci:
   # repository that sets ci.carry_review_on_replay on its own default branch
   # overrides this value.
   carry_review_on_replay: false
+
+  # Whether the CI step finishes the run as soon as every check is green
+  # instead of monitoring the pull request until it is merged or closed.
+  # Defaults to false, which is what the step has always done: the run stays
+  # open, keeps watching the PR, and can still auto-rebase it if the base branch
+  # later conflicts. Set true to record the checks-passed verdict and release
+  # the run there (outcome: checks-passed, run status: checks_passed), so the
+  # run's worktree and lane are not held for a human merge decision - the
+  # recorded CI duration then measures CI only. CI readiness is still recorded
+  # either way; a repository that sets ci.release_after_checks_pass on its own
+  # default branch overrides this value.
+  release_after_checks_pass: false
 
 # Auto-fix commit subject template. Available variables: {{.Step}}, {{.Summary}}, and {{.Branch}}.
 # When set to anything but the default, it also renders the Push step's
@@ -3567,6 +3598,9 @@ func applyCIOverrides(dst *CI, src *CIRaw) {
 	}
 	if src.CarryReviewOnReplay != nil {
 		dst.CarryReviewOnReplay = *src.CarryReviewOnReplay
+	}
+	if src.ReleaseAfterChecksPass != nil {
+		dst.ReleaseAfterChecksPass = *src.ReleaseAfterChecksPass
 	}
 }
 
