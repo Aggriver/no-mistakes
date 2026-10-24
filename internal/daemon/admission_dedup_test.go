@@ -4,10 +4,35 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kunchenguid/no-mistakes/internal/db"
 	"github.com/kunchenguid/no-mistakes/internal/ipc"
 	"github.com/kunchenguid/no-mistakes/internal/pipeline"
 	"github.com/kunchenguid/no-mistakes/internal/types"
 )
+
+func TestReusableActiveRunRequiresFreshMatchingRow(t *testing.T) {
+	head := "head"
+	digest := "digest"
+	observed := &db.Run{ID: "run-1"}
+	current := &db.Run{ID: "run-1", SubmittedHeadSHA: &head, AdmissionDigest: &digest}
+	if !reusableActiveRun(observed, current, head, digest) {
+		t.Fatal("fresh equivalent active row was not reusable")
+	}
+	if reusableActiveRun(observed, nil, head, digest) {
+		t.Fatal("stopped run remained reusable")
+	}
+	replacement := *current
+	replacement.ID = "run-2"
+	if reusableActiveRun(observed, &replacement, head, digest) {
+		t.Fatal("replacement active row reused stale run")
+	}
+	parked := *current
+	parkedAt := time.Now().Unix()
+	parked.AwaitingAgentSince = &parkedAt
+	if reusableActiveRun(observed, &parked, head, digest) {
+		t.Fatal("parked run was reusable")
+	}
+}
 
 func TestPushReceivedReusesEquivalentActiveRunAndSupersedesChangedIntent(t *testing.T) {
 	started := make(chan string, 3)
