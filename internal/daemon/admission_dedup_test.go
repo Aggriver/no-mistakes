@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -15,22 +16,29 @@ func TestReusableActiveRunRequiresFreshMatchingRow(t *testing.T) {
 	digest := "digest"
 	observed := &db.Run{ID: "run-1"}
 	current := &db.Run{ID: "run-1", SubmittedHeadSHA: &head, AdmissionDigest: &digest}
-	if !reusableActiveRun(observed, current, head, digest) {
+	m := &RunManager{runContexts: make(map[string]context.Context)}
+	runCtx, cancel := context.WithCancelCause(context.Background())
+	m.runContexts[current.ID] = runCtx
+	if !m.reusableActiveRun(observed, current, head, digest) {
 		t.Fatal("fresh equivalent active row was not reusable")
 	}
-	if reusableActiveRun(observed, nil, head, digest) {
+	if m.reusableActiveRun(observed, nil, head, digest) {
 		t.Fatal("stopped run remained reusable")
 	}
 	replacement := *current
 	replacement.ID = "run-2"
-	if reusableActiveRun(observed, &replacement, head, digest) {
+	if m.reusableActiveRun(observed, &replacement, head, digest) {
 		t.Fatal("replacement active row reused stale run")
 	}
 	parked := *current
 	parkedAt := time.Now().Unix()
 	parked.AwaitingAgentSince = &parkedAt
-	if reusableActiveRun(observed, &parked, head, digest) {
+	if m.reusableActiveRun(observed, &parked, head, digest) {
 		t.Fatal("parked run was reusable")
+	}
+	cancel(context.Canceled)
+	if m.reusableActiveRun(observed, current, head, digest) {
+		t.Fatal("run with requested cancellation was reusable")
 	}
 }
 

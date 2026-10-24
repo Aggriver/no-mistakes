@@ -51,6 +51,7 @@ type RunManager struct {
 	mu           sync.Mutex
 	executors    map[string]*pipeline.Executor      // runID → executor
 	cancels      map[string]context.CancelCauseFunc // runID → cancel function with cause
+	runContexts  map[string]context.Context         // runID → context exposing requested cancellation
 	dones        map[string]chan struct{}           // runID → closed when goroutine exits
 	wg           sync.WaitGroup                     // tracks background run goroutines
 	shuttingDown atomic.Bool                        // prevents new runs during shutdown
@@ -94,6 +95,7 @@ func NewRunManager(database *db.DB, p *paths.Paths, stepFactory StepFactory) *Ru
 	return &RunManager{
 		executors:     make(map[string]*pipeline.Executor),
 		cancels:       make(map[string]context.CancelCauseFunc),
+		runContexts:   make(map[string]context.Context),
 		dones:         make(map[string]chan struct{}),
 		db:            database,
 		paths:         p,
@@ -471,6 +473,7 @@ func (m *RunManager) resumeRecoveredRun(plan recoveredRunPlan) {
 	m.mu.Lock()
 	m.executors[plan.run.ID] = executor
 	m.cancels[plan.run.ID] = cancel
+	m.runContexts[plan.run.ID] = runCtx
 	m.dones[plan.run.ID] = done
 	m.mu.Unlock()
 
@@ -503,6 +506,7 @@ func (m *RunManager) resumeRecoveredRun(plan recoveredRunPlan) {
 			m.mu.Lock()
 			delete(m.executors, plan.run.ID)
 			delete(m.cancels, plan.run.ID)
+			delete(m.runContexts, plan.run.ID)
 			delete(m.dones, plan.run.ID)
 			m.mu.Unlock()
 		}()
@@ -1626,7 +1630,7 @@ func (m *RunManager) startRunWithIntentSourceLocked(ctx context.Context, repo *d
 	if currentActiveErr != nil {
 		return "", currentActiveErr
 	}
-	if retry == nil && plan == nil && reusableActiveRun(active, currentActive, headSHA, admissionDigest) {
+	if retry == nil && plan == nil && m.reusableActiveRun(active, currentActive, headSHA, admissionDigest) {
 		slog.Info("reused equivalent active run", "run_id", currentActive.ID, "repo_id", repo.ID, "branch", branch)
 		telemetry.Track("run", telemetry.Fields{
 			"action": "duplicate_suppressed", "trigger": trigger, "branch_role": branchRole,
@@ -1904,6 +1908,7 @@ func (m *RunManager) startRunWithIntentSourceLocked(ctx context.Context, repo *d
 	m.mu.Lock()
 	m.executors[run.ID] = executor
 	m.cancels[run.ID] = cancel
+	m.runContexts[run.ID] = runCtx
 	m.dones[run.ID] = done
 	m.mu.Unlock()
 
@@ -1961,6 +1966,7 @@ func (m *RunManager) startRunWithIntentSourceLocked(ctx context.Context, repo *d
 			m.mu.Lock()
 			delete(m.executors, run.ID)
 			delete(m.cancels, run.ID)
+			delete(m.runContexts, run.ID)
 			delete(m.dones, run.ID)
 			m.mu.Unlock()
 		}()
@@ -2013,11 +2019,17 @@ func (m *RunManager) startRunWithIntentSourceLocked(ctx context.Context, repo *d
 	return run.ID, nil
 }
 
-func reusableActiveRun(observed, current *db.Run, headSHA, admissionDigest string) bool {
-	return observed != nil && current != nil && current.ID == observed.ID &&
-		current.AwaitingAgentSince == nil && current.SubmittedHeadSHA != nil &&
-		*current.SubmittedHeadSHA == headSHA && current.AdmissionDigest != nil &&
-		admissionDigest != "" && *current.AdmissionDigest == admissionDigest
+func (m *RunManager) reusableActiveRun(observed, current *db.Run, headSHA, admissionDigest string) bool {
+	if observed == nil || current == nil || current.ID != observed.ID ||
+		current.AwaitingAgentSince != nil || current.SubmittedHeadSHA == nil ||
+		*current.SubmittedHeadSHA != headSHA || current.AdmissionDigest == nil ||
+		admissionDigest == "" || *current.AdmissionDigest != admissionDigest {
+		return false
+	}
+	m.mu.Lock()
+	runCtx, tracked := m.runContexts[current.ID]
+	m.mu.Unlock()
+	return tracked && context.Cause(runCtx) == nil
 }
 
 // evalAutoCaptureTimeout bounds one automatic collection pass. Collection is
