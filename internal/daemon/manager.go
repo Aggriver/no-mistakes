@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -772,8 +773,8 @@ func ownedGateRepoID(p *paths.Paths, gate string) (string, error) {
 // sameGateDir reports whether two paths name the same gate directory. The
 // canonical spellings are compared first; when they differ, the two directories
 // must be the same on-disk object (os.SameFile). That follows the filesystem's
-// own case rule: a macOS home registered as /Users/Name but stored as
-// /Users/name resolves to one directory, while on a case-sensitive volume the
+// own case rule: a macOS home registered as /Users/example but stored as
+// /Users/EXAMPLE resolves to one directory, while on a case-sensitive volume the
 // same two spellings are different directories and stay refused. A path that
 // cannot be stat'ed is never the same, so the guard stays fail-closed.
 func sameGateDir(a, b string) bool {
@@ -1134,6 +1135,31 @@ func validateLaunchValue(field, value string) error {
 func digestIntent(intent string) string {
 	sum := sha256.Sum256([]byte(intent))
 	return fmt.Sprintf("%x", sum)
+}
+
+type runAdmissionIdentity struct {
+	HeadSHA              string              `json:"head_sha"`
+	EffectiveConfig      *config.Config      `json:"effective_config"`
+	SkipSteps            []types.StepName    `json:"skip_steps,omitempty"`
+	Intent               string              `json:"intent,omitempty"`
+	IntentSource         string              `json:"intent_source,omitempty"`
+	LaunchNonce          string              `json:"launch_nonce,omitempty"`
+	ValidationGeneration string              `json:"validation_generation,omitempty"`
+	IntentDigest         string              `json:"intent_digest,omitempty"`
+	PRBaseBranch         string              `json:"pr_base_branch,omitempty"`
+	OmitIntent           bool                `json:"omit_intent,omitempty"`
+	VerificationPlanID   string              `json:"verification_plan_id,omitempty"`
+	ClosingIssueRefs     []string            `json:"closing_issue_refs,omitempty"`
+	PiProfile            *agentcfg.PiProfile `json:"pi_profile,omitempty"`
+}
+
+func digestRunAdmission(identity runAdmissionIdentity) (string, error) {
+	payload, err := json.Marshal(identity)
+	if err != nil {
+		return "", fmt.Errorf("encode run admission identity: %w", err)
+	}
+	sum := sha256.Sum256(payload)
+	return fmt.Sprintf("%x", sum), nil
 }
 
 func receiptForRun(run *db.Run, created bool) (ipc.LaunchReceipt, error) {
@@ -1506,10 +1532,6 @@ func (m *RunManager) startRunWithIntentSourceLocked(ctx context.Context, repo *d
 			trackStartFailure("invalid_pi_profile")
 			return "", err
 		}
-		if err := m.validatePiProfileAgentsBeforeCancel(ctx, repo, headSHA, globalCfg); err != nil {
-			trackStartFailure("invalid_pi_profile")
-			return "", err
-		}
 	}
 
 	plan, err := verificationplan.Resolve(m.paths.RunInputsDir(), planID, repo.ID, branch, headSHA)
@@ -1530,9 +1552,6 @@ func (m *RunManager) startRunWithIntentSourceLocked(ctx context.Context, repo *d
 			return "", fmt.Errorf("verification plan capture already belongs to a run")
 		}
 	}
-
-	// Cancel any active run for this repo+branch.
-	m.cancelActiveRuns(repo.ID, branch)
 
 	storedIntent := intent
 	if source != db.RunIntentSourceRerun && launchNonce == "" && plan == nil {
@@ -1557,7 +1576,61 @@ func (m *RunManager) startRunWithIntentSourceLocked(ctx context.Context, repo *d
 	// pr.publish_intent is enforced independently by the PR step.
 	storedOmitIntent := omitIntent || (globalCfg != nil && !globalCfg.Intent.PublishesIntentByDefault())
 
-	run, err := m.db.InsertRunWithIntentAndLaunchNonce(repo.ID, branch, headSHA, baseSHA, runIntent, launchNonce, validationGeneration, intentDigest, storedPRBaseBranch, storedOmitIntent, plan, pin)
+	// Build a privacy-safe identity before superseding anything. The submitted
+	// head pins pushed configuration, while effectiveConfigBeforeRun privately
+	// fetches and pins the trusted default-branch configuration. An equivalent
+	// active delivery reuses the existing run; a changed head, intent, launch
+	// option, or effective configuration remains a genuinely new task.
+	var admissionDigest string
+	active, activeErr := m.db.GetActiveRun(repo.ID, branch)
+	if activeErr != nil {
+		return "", activeErr
+	}
+	if active != nil && globalCfgErr != nil {
+		trackStartFailure("load_global_config")
+		return "", fmt.Errorf("load global config before replacing active run: %w", globalCfgErr)
+	}
+	if globalCfgErr == nil {
+		effectiveCfg, _, preflightErr := m.effectiveConfigBeforeRun(ctx, repo, headSHA, globalCfg, "run admission")
+		if preflightErr != nil {
+			if active != nil {
+				trackStartFailure("admission_config")
+				return "", preflightErr
+			}
+		} else {
+			if pin != nil {
+				if err := effectiveCfg.ValidatePiProfileAgents(); err != nil {
+					trackStartFailure("invalid_pi_profile")
+					return "", err
+				}
+			}
+			admissionDigest, err = digestRunAdmission(runAdmissionIdentity{
+				HeadSHA: headSHA, EffectiveConfig: effectiveCfg, SkipSteps: skipSteps,
+				Intent: storedIntent, IntentSource: source, LaunchNonce: launchNonce,
+				ValidationGeneration: validationGeneration, IntentDigest: intentDigest,
+				PRBaseBranch: storedPRBaseBranch, OmitIntent: storedOmitIntent,
+				VerificationPlanID: planID, ClosingIssueRefs: closingIssues, PiProfile: pin,
+			})
+			if err != nil {
+				return "", err
+			}
+		}
+	}
+	if retry == nil && plan == nil && active != nil && active.AwaitingAgentSince == nil && active.SubmittedHeadSHA != nil &&
+		*active.SubmittedHeadSHA == headSHA && active.AdmissionDigest != nil &&
+		admissionDigest != "" && *active.AdmissionDigest == admissionDigest {
+		slog.Info("reused equivalent active run", "run_id", active.ID, "repo_id", repo.ID, "branch", branch)
+		telemetry.Track("run", telemetry.Fields{
+			"action": "duplicate_suppressed", "trigger": trigger, "branch_role": branchRole,
+		})
+		return active.ID, nil
+	}
+
+	// A different task on the same branch supersedes its predecessor. Runs on
+	// other branches and repositories remain concurrent.
+	m.cancelActiveRuns(repo.ID, branch)
+
+	run, err := m.db.InsertRunWithAdmissionDigest(repo.ID, branch, headSHA, baseSHA, runIntent, launchNonce, validationGeneration, intentDigest, admissionDigest, storedPRBaseBranch, storedOmitIntent, plan, pin)
 	if err != nil {
 		trackStartFailure("create_run")
 		return "", fmt.Errorf("create run: %w", err)
