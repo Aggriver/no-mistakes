@@ -178,8 +178,9 @@ func (a *codexAgent) Close() error { return nil }
 
 // buildArgs constructs the codex CLI arguments. User-supplied extraArgs are
 // inserted between "exec" and the stdin prompt marker so user flags (e.g. -m, --sandbox)
-// take effect. If the user declared their own execution-mode flag, the
-// default --dangerously-bypass-approvals-and-sandbox is not added.
+// take effect. If the user declared their own execution-mode flag or top-level
+// config override, the default --dangerously-bypass-approvals-and-sandbox is
+// not added.
 // A non-empty resumeID routes through `codex exec resume <id> -`,
 // which exposes a narrower flag surface than `codex exec` (no --color, no
 // -s/--sandbox as of codex 0.144): unsupported user extraArgs make the
