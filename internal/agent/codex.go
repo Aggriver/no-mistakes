@@ -293,9 +293,13 @@ func codexArgsContain(extraArgs []string, flag string) bool {
 }
 
 // codexUserSetExecutionMode reports whether extraArgs already declare an
-// execution/sandbox flag that conflicts with the default bypass.
+// execution/sandbox flag or top-level config override that conflicts with the
+// default bypass. Config overrides also work with exec resume, whose flag
+// surface does not include --sandbox.
 func codexUserSetExecutionMode(extraArgs []string) bool {
-	for _, arg := range extraArgs {
+	for i := 0; i < len(extraArgs); i++ {
+		arg := extraArgs[i]
+		var config string
 		switch {
 		case arg == "--dangerously-bypass-approvals-and-sandbox",
 			arg == "--ask-for-approval",
@@ -304,6 +308,21 @@ func codexUserSetExecutionMode(extraArgs []string) bool {
 		case strings.HasPrefix(arg, "--ask-for-approval="),
 			strings.HasPrefix(arg, "--sandbox="):
 			return true
+		case arg == "-c" || arg == "--config":
+			if i+1 < len(extraArgs) {
+				i++
+				config = extraArgs[i]
+			}
+		case strings.HasPrefix(arg, "--config="):
+			config = strings.TrimPrefix(arg, "--config=")
+		case strings.HasPrefix(arg, "-c"):
+			config = strings.TrimPrefix(strings.TrimPrefix(arg, "-c"), "=")
+		}
+		if key, _, ok := strings.Cut(config, "="); ok {
+			switch strings.TrimSpace(key) {
+			case "default_permissions", "sandbox_mode", "approval_policy":
+				return true
+			}
 		}
 	}
 	return false
