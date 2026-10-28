@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.101.0](https://github.com/Aggriver/no-mistakes/compare/v1.100.2...v1.101.0) (2026-10-28)
+
+
+### Features
+
+* **cli:** accept file and stdin input for axi respond ([#1509](https://github.com/Aggriver/no-mistakes/issues/1509)) ([61e0a91](https://github.com/Aggriver/no-mistakes/commit/61e0a91a537d943ca34ca2d33859aef6f9db95e6))
+* **daemon:** reuse equivalent active runs ([d6df8c1](https://github.com/Aggriver/no-mistakes/commit/d6df8c10e95466cd83fe502dc112bfd59d1376c7))
+* **daemon:** reuse equivalent active runs ([a1926b2](https://github.com/Aggriver/no-mistakes/commit/a1926b2c6f562aa22a524e94a3b02946cf78b09c))
+
+
+### Bug Fixes
+
+* **agent:** honor explicit Codex execution policies ([be75ed1](https://github.com/Aggriver/no-mistakes/commit/be75ed1a75a3e275d031c6d411eb1e612517f509))
+* **codex:** preserve explicit native permission overrides ([b798102](https://github.com/Aggriver/no-mistakes/commit/b7981022388828de69dcc5c78c4f08fe874fecd9))
+* **daemon:** bind dedup to fresh run state ([259a5fa](https://github.com/Aggriver/no-mistakes/commit/259a5fa28a1715296ab12a71a0a91c0735cf7e5a))
+* **daemon:** bind dedup to fresh run state ([c593ba3](https://github.com/Aggriver/no-mistakes/commit/c593ba3331b1261333a4aa3623620611001f3489))
+* **daemon:** refuse canceled duplicate runs ([b2682e9](https://github.com/Aggriver/no-mistakes/commit/b2682e9d6c488ebd5209a3d8333125b54c205f25))
+* **daemon:** refuse canceled duplicate runs ([d7b060f](https://github.com/Aggriver/no-mistakes/commit/d7b060fd252127977da5a73332f745634e98eb93))
+* **db:** order filesystem-identity repo lookup by insertion, strengthen case-identity test ([#1479](https://github.com/Aggriver/no-mistakes/issues/1479)) ([309ed0a](https://github.com/Aggriver/no-mistakes/commit/309ed0a9fcd117272914ff9d561330040550673a))
+* **pipeline:** preserve user-authored findings during review merges ([#1512](https://github.com/Aggriver/no-mistakes/issues/1512)) ([88ab445](https://github.com/Aggriver/no-mistakes/commit/88ab445d894a37d0ab08468cd4d863cccba08737))
+
 ## [1.100.2](https://github.com/kunchenguid/no-mistakes/compare/v1.100.1...v1.100.2) (2026-10-24)
 
 
