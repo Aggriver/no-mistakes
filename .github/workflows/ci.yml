@@ -63,8 +63,8 @@ jobs:
     # remainder, and pipeline/steps is its own shard so it no longer serializes
     # behind the other git-heavy packages on a 4-core GitHub-hosted runner.
     # Each shard's wall stays below this cap so a real hang dumps goroutines.
-    # 40 is a runaway guard, not a target. Per-package Go timeouts fire first,
-    # and the job cap keeps a wedged runner well short of the six-hour default.
+    # 40 is a runaway guard, not a target - Linux and macOS finish far inside
+    # it, and it still keeps a wedged runner well short of the six-hour default.
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v6
@@ -102,8 +102,12 @@ jobs:
             Write-Host "::warning::Defender exclusions unavailable, Windows tests run untuned: $_"
           }
 
-      - name: Test on Unix
-        if: runner.os != 'Windows'
+      - name: Test on Linux
+        if: runner.os == 'Linux'
+        run: go test -race ./...
+
+      - name: Test on macOS
+        if: runner.os == 'macOS'
         run: go test -race -timeout=20m ./...
 
       # Git-heavy packages are the Windows wall floor. NM_CI_WINDOWS_GIT_EXCLUDE
