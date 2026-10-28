@@ -164,7 +164,9 @@ func waitPublished(t *testing.T, h *Harness, branch, prevID, label string) *ipc.
 		t.Fatalf("%s: run %s status=%s error=%v: PR step did not complete", label, run.ID, run.Status, deref(run.Error))
 	}
 	if !run.Status.Terminal() {
-		h.CancelRun(run.ID)
+		if out, err := h.Run("axi", "abort", "--run", run.ID); err != nil {
+			t.Fatalf("%s: stop published run %s: %v\n%s", label, run.ID, err, out)
+		}
 		h.WaitForRun(branch, time.Minute)
 	} else if run.Status != types.RunCompleted && run.Status != types.RunChecksPassed {
 		// Both are successful terminal outcomes for a published PR: completed
