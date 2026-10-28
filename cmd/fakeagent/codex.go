@@ -21,6 +21,10 @@ func runCodex(args []string, promptReader io.Reader, scenario *Scenario) int {
 	if err := applyAction(action); err != nil {
 		return 1
 	}
+	if err := askQuestions(prompt, action.AskQuestions); err != nil {
+		fmt.Fprintf(os.Stderr, "fakeagent: %v\n", err)
+		return 1
+	}
 
 	// Real codex constrains output to --output-schema, so the fake
 	// mirrors that by trimming the scenario's catch-all structured map

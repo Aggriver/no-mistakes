@@ -18,9 +18,9 @@ acp_registry_overrides:
   local-gemini: node /opt/mock-acp-agent.mjs
 
 agent_path_override:
-  claude: /Users/you/bin/claude
+  claude: /Users/user/bin/claude
   codex: /opt/homebrew/bin/codex
-  grok: /Users/you/.grok/bin/grok
+  grok: /Users/user/.grok/bin/grok
   rovodev: /usr/local/bin/acli
   opencode: /usr/local/bin/opencode
   pi: /usr/local/bin/pi
@@ -59,7 +59,7 @@ log_level: info
 session_reuse: true
 
 worktree_roots:
-  /Users/you/src/my-repo: /Users/you/work/my-repo-runs
+  /Users/user/src/my-repo: /Users/user/work/my-repo-runs
 
 forge_profiles:
   github-personal:
@@ -470,12 +470,19 @@ The Claude, Codex, Grok, Pi, and Antigravity session-control forms are reserved 
 Smart defaults:
 
 - For `claude`, supplying `--permission-mode` (or `--dangerously-skip-permissions`) suppresses the default `--dangerously-skip-permissions`.
-- For `codex`, supplying `--ask-for-approval`, `--sandbox`, or `--dangerously-bypass-approvals-and-sandbox` suppresses the default `--dangerously-bypass-approvals-and-sandbox`.
+- For `codex`, supplying `--ask-for-approval`, `--sandbox`, or `--dangerously-bypass-approvals-and-sandbox` suppresses the default `--dangerously-bypass-approvals-and-sandbox`. Explicit top-level `default_permissions`, `sandbox_mode`, or `approval_policy` overrides through `-c` / `--config` also suppress it. Configuring only the Codex user config file does not suppress the adapter's default bypass; pass an explicit override here.
 - For `grok`, supplying `--permission-mode` or `--always-approve` suppresses the default `--permission-mode bypassPermissions`. No model flag is added: Grok uses its current configured default unless you explicitly set `-m` or `--model`.
 - For `antigravity`, supplying `-t` or `--print-timeout` suppresses the default `--print-timeout 24h`.
 
 Permission and sandbox flags affect the underlying agent, but they do not disable no-mistakes' pipeline prompt steering.
 Pipeline agents are still told to keep intentional writes inside the worktree and avoid mutating system state outside it.
+
+For Codex permission profiles with fixer session reuse, use a config override
+such as `agent_args_override: {codex: [-c, 'default_permissions="project-gate"']}`.
+Define `project-gate` in the Codex configuration first. This form works with
+both `codex exec` and `codex exec resume`; `--sandbox` is not supported by
+`exec resume` in Codex 0.164.0. Do not mix permission profiles with legacy
+`sandbox_mode` settings.
 
 Example:
 
@@ -517,7 +524,7 @@ forge_profiles:
   github-personal:
     gh_config_dir: ~/.config/gh-personal
   github-work:
-    gh_config_dir: /Users/you/.config/gh-work
+    gh_config_dir: /Users/user/.config/gh-work
   gitlab-work:
     glab_config_dir: ~/.config/glab-work
     expected_login: team-bot

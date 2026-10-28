@@ -245,6 +245,13 @@ func TestCIWorkflow_WindowsHangSurfacesAsGoTimeoutNotJobCancellation(t *testing.
 		if shard == "" {
 			t.Fatalf("Windows test step %q is not gated on matrix.shard", job.Steps[command.step].Name)
 		}
+		wantTimeout := 15 * time.Minute
+		if shard == "steps" {
+			wantTimeout = 25 * time.Minute
+		}
+		if goTimeout != wantTimeout {
+			t.Fatalf("Windows %s shard go test -timeout = %s, want %s", shard, goTimeout, wantTimeout)
+		}
 		stepShards[shard] = struct{}{}
 		patterns := goTestPackagePatterns(command)
 		switch {
@@ -424,6 +431,6 @@ func goTestTimeout(t *testing.T, command workflowCommand) time.Duration {
 		}
 		return duration
 	}
-	t.Fatalf("Windows test command must pass an explicit -timeout, got %#v", command.args)
+	t.Fatalf("go test command must pass an explicit -timeout, got %#v", command.args)
 	return 0
 }

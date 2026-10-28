@@ -81,6 +81,7 @@ func reviewConversationScenario(t *testing.T) string {
           line: 1
           description: "PENDING ANSWER (q1): the default this ships with depends on the answer"
           action: ask-user
+          review_scope: source
       summary: "one question open"
       risk_level: medium
       risk_rationale: "a question is open"

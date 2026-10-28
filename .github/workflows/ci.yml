@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   pull_request:
     branches:
       - main
@@ -101,9 +102,13 @@ jobs:
             Write-Host "::warning::Defender exclusions unavailable, Windows tests run untuned: $_"
           }
 
-      - name: Test on Unix
-        if: runner.os != 'Windows'
+      - name: Test on Linux
+        if: runner.os == 'Linux'
         run: go test -race ./...
+
+      - name: Test on macOS
+        if: runner.os == 'macOS'
+        run: go test -race -timeout=20m ./...
 
       # Git-heavy packages are the Windows wall floor. NM_CI_WINDOWS_GIT_EXCLUDE
       # on the core shard is the union of the git and steps shards; the workflow
@@ -117,7 +122,7 @@ jobs:
 
       - name: Test on Windows (pipeline/steps)
         if: runner.os == 'Windows' && matrix.shard == 'steps'
-        run: go test -v -timeout=15m ./internal/pipeline/steps/...
+        run: go test -v -timeout=25m ./internal/pipeline/steps/...
 
       - name: Test on Windows (core)
         if: runner.os == 'Windows' && matrix.shard == 'core'

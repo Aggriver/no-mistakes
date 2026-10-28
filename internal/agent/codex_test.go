@@ -136,6 +136,60 @@ func TestCodexAgent_BuildArgs_WithOutputSchema(t *testing.T) {
 	}
 }
 
+// Codex accepts config overrides on both exec and exec resume. Explicit
+// execution policy must survive the adapter; unrelated config must preserve
+// the existing default. Assert the generated CLI contract, not source text.
+func TestCodexAgent_ConfigExecutionMode(t *testing.T) {
+	tests := []struct {
+		name   string
+		extra  []string
+		bypass bool
+	}{
+		{"permissions", []string{"-c", `default_permissions="aggriver-gate"`}, false},
+		{"long config", []string{"--config", `default_permissions="aggriver-gate"`}, false},
+		{"equals config", []string{`--config=default_permissions="aggriver-gate"`}, false},
+		{"short attached", []string{`-cdefault_permissions="aggriver-gate"`}, false},
+		{"short equals", []string{`-c=default_permissions="aggriver-gate"`}, false},
+		{"legacy config", []string{"-c", `sandbox_mode="workspace-write"`}, false},
+		{"approval config", []string{"-c", `approval_policy="never"`}, false},
+		{"whitespace", []string{"-c", ` default_permissions = "aggriver-gate"`}, false},
+		{"unrelated", []string{"-c", `model="example"`}, true},
+		{"value contains key", []string{"-c", `instructions="default_permissions=example"`}, true},
+		{"nested key", []string{"-c", `profiles.example.default_permissions="aggriver-gate"`}, true},
+		{"key suffix", []string{"-c", `other_default_permissions="aggriver-gate"`}, true},
+		{"missing assignment", []string{"-c", "default_permissions"}, true},
+		{"missing value", []string{"-c"}, true},
+	}
+	for _, tc := range tests {
+		for _, resumeID := range []string{"", "session-123"} {
+			t.Run(tc.name+"/"+resumeID, func(t *testing.T) {
+				a := &codexAgent{extraArgs: tc.extra}
+				args := a.buildArgs("/tmp/schema.json", resumeID)
+				if got := codexArgsContain(args, "--dangerously-bypass-approvals-and-sandbox"); got != tc.bypass {
+					t.Fatalf("bypass = %v, want %v: %q", got, tc.bypass, args)
+				}
+				offset := 1
+				if resumeID != "" {
+					offset = 2
+					if args[1] != "resume" || args[offset+len(tc.extra)] != resumeID {
+						t.Fatalf("resume identity lost: %q", args)
+					}
+				}
+				for i, want := range tc.extra {
+					if args[offset+i] != want {
+						t.Fatalf("override changed: %q", args)
+					}
+				}
+				for _, flag := range []string{"-", "--json", "--output-schema", "/tmp/schema.json"} {
+					if !codexArgsContain(args, flag) {
+						t.Fatalf("managed argument %q lost: %q", flag, args)
+					}
+				}
+			})
+		}
+	}
+}
+
 func writeFakeCodex(t *testing.T, dir, posixScript, windowsScript string) string {
 	t.Helper()
 
