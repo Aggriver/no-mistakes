@@ -7,6 +7,7 @@ import (
 
 type workflowConditionContext struct {
 	EventName      string
+	Ref            string
 	ReleaseTagName string
 	Cancelled      bool
 	Needs          map[string]string
@@ -96,6 +97,8 @@ func workflowConditionValue(expression string, context workflowConditionContext)
 	switch expression {
 	case "github.event_name":
 		return context.EventName, nil
+	case "github.ref":
+		return context.Ref, nil
 	case "github.event.release.tag_name":
 		return context.ReleaseTagName, nil
 	}
