@@ -3,6 +3,7 @@ package main
 import (
 	"slices"
 	"testing"
+	"time"
 )
 
 func TestCIWorkflowRunsTestsOnAllSupportedDesktopPlatforms(t *testing.T) {
@@ -35,11 +36,17 @@ func TestCIWorkflowUsesRaceTestsOnUnixRunners(t *testing.T) {
 
 	var raceTests []workflowCommand
 	for _, command := range commands {
-		if command.name == "go" && slices.Equal(command.args, []string{"test", "-race", "./..."}) {
+		if command.name == "go" && slices.Equal(command.args, []string{"test", "-race", "-timeout=20m", "./..."}) {
 			raceTests = append(raceTests, command)
 		}
 	}
 	if len(raceTests) != 1 {
-		t.Fatalf("Unix-only go test -race ./... commands = %d, want 1; normalized commands: %#v", len(raceTests), commands)
+		t.Fatalf("Unix-only go test -race -timeout=20m ./... commands = %d, want 1; normalized commands: %#v", len(raceTests), commands)
+	}
+
+	goTimeout := goTestTimeout(t, raceTests[0])
+	jobTimeout := time.Duration(job.TimeoutMinutes) * time.Minute
+	if goTimeout >= jobTimeout {
+		t.Fatalf("Unix go test -timeout is %s and the job cap is %s; the Go timeout must fire first so a hang produces a goroutine dump", goTimeout, jobTimeout)
 	}
 }
