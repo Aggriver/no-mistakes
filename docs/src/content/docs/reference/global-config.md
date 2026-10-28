@@ -482,7 +482,7 @@ such as `agent_args_override: {codex: [-c, 'default_permissions="project-gate"']
 Define `project-gate` in the Codex configuration first. This form works with
 both `codex exec` and `codex exec resume`; `--sandbox` is not supported by
 `exec resume` in Codex 0.164.0. Do not mix permission profiles with legacy
-`sandbox_mode` settings, which take precedence in Codex.
+`sandbox_mode` settings.
 
 Example:
 

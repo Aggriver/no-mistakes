@@ -183,7 +183,7 @@ func (a *codexAgent) Close() error { return nil }
 // not added.
 // A non-empty resumeID routes through `codex exec resume <id> -`,
 // which exposes a narrower flag surface than `codex exec` (no --color, no
-// -s/--sandbox as of codex 0.144): unsupported user extraArgs make the
+// -s/--sandbox as of Codex 0.164.0): unsupported user extraArgs make the
 // invocation fail fast and the caller's cold fallback preserves correctness.
 func (a *codexAgent) buildArgs(schemaPath, resumeID string) []string {
 	args := make([]string, 0, len(a.extraArgs)+11)
