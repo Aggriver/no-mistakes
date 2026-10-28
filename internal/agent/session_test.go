@@ -122,8 +122,8 @@ func TestCodexAgent_BuildArgs_Resume(t *testing.T) {
 	if !strings.Contains(joined, "thread-99 -") {
 		t.Fatalf("resume prompt must use stdin marker after the session id: %v", args)
 	}
-	// codex exec resume (0.144) does not accept --color; passing it fails the
-	// whole invocation.
+	// codex exec resume has a narrower flag surface and does not accept --color;
+	// passing it fails the whole invocation.
 	if strings.Contains(joined, "--color") {
 		t.Fatalf("resume args must not include --color: %v", args)
 	}
